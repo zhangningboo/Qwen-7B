@@ -24,7 +24,7 @@ inference: false
 
 ## 介绍 (Introduction)
 
-**通义千问-7B（Qwen-7B）**是阿里云研发的通义千问大模型系列的70亿参数规模的模型。Qwen-7B是基于Transformer的大语言模型, 在超大规模的预训练数据上进行训练得到。预训练数据类型多样，覆盖广泛，包括大量网络文本、专业书籍、代码等。同时，在Qwen-7B的基础上，我们使用对齐机制打造了基于大语言模型的AI助手Qwen-7B-Chat。相较于最初开源的Qwen-7B模型，我们现已将预训练模型和Chat模型更新到效果更优的Qwen-7B v1.1版本（除表格中特殊注明的结果外，以下正文中Qwen-7B均代指Qwen-7B v1.1）。本仓库为Qwen-7B v1.1预训练模型的仓库。
+**通义千问-7B（Qwen-7B）**是阿里云研发的通义千问大模型系列的70亿参数规模的模型。Qwen-7B是基于Transformer的大语言模型, 在超大规模的预训练数据上进行训练得到。预训练数据类型多样，覆盖广泛，包括大量网络文本、专业书籍、代码等。同时，在Qwen-7B的基础上，我们使用对齐机制打造了基于大语言模型的AI助手Qwen-7B-Chat。相较于最初开源的Qwen-7B模型，我们现已将预训练模型和Chat模型更新到效果更优的版本。本仓库为Qwen-7B预训练模型的仓库。
 
 通义千问-7B（Qwen-7B）主要有以下特点：
 
@@ -34,15 +34,15 @@ inference: false
 
 如果您想了解更多关于通义千问7B开源模型的细节，我们建议您参阅[Github代码库](https://github.com/QwenLM/Qwen)。
 
-**Qwen-7B** is the 7B-parameter version of the large language model series, Qwen (abbr. Tongyi Qianwen), proposed by Alibaba Cloud. Qwen-7B is a Transformer-based large language model, which is pretrained on a large volume of data, including web texts, books, codes, etc. Additionally, based on the pretrained Qwen-7B, we release Qwen-7B-Chat, a large-model-based AI assistant, which is trained with alignment techniques. Now we have updated both our pretrained and chat model to Qwen-7B v1.1 version with better performances. This repository is the one for Qwen-7B v1.1 pretrained base model.
+**Qwen-7B** is the 7B-parameter version of the large language model series, Qwen (abbr. Tongyi Qianwen), proposed by Alibaba Cloud. Qwen-7B is a Transformer-based large language model, which is pretrained on a large volume of data, including web texts, books, codes, etc. Additionally, based on the pretrained Qwen-7B, we release Qwen-7B-Chat, a large-model-based AI assistant, which is trained with alignment techniques. Now we have updated both our pretrained and chat models for better performances. This repository is the one for the Qwen-7B base language model.
 
-The features of Qwen-7B v1.1 include:
+The features of Qwen-7B include:
 
 1. **Large-scale high-quality training corpora**: It is pretrained on over 2.4 trillion tokens, including Chinese, English, multilingual texts, code, and mathematics, covering general and professional fields. The distribution of the pre-training corpus has been optimized through a large number of ablation experiments.
 2. **Competitive performance**: It significantly surpasses existing open-source models of similar scale on multiple Chinese and English downstream evaluation tasks (including commonsense, reasoning, code, mathematics, etc.), and even surpasses some larger-scale models in several benchmarks. See below for specific evaluation results.
 3. **More comprehensive vocabulary coverage**: Compared with other open-source models based on Chinese and English vocabularies, Qwen-7B uses a vocabulary of over 150K tokens. This vocabulary is more friendly to multiple languages, enabling users to directly further enhance the capability for certain languages without expanding the vocabulary.
 
-For more details about the open-source model of Qwen-7B, please refer to the [Github](https://github.com/QwenLM/Qwen) code repository.
+For more details about Qwen, please refer to the [Github](https://github.com/QwenLM/Qwen) code repository.
 <br>
 
 ## 要求（Requirements）
@@ -127,9 +127,9 @@ Our tokenizer based on tiktoken is different from other tokenizers, e.g., senten
 
 ## 模型细节 (Model)
 
-Qwen-7B模型规模基本情况如下所示，在Qwen-7B v1.1版本，我们将模型训练的序列长度增加到了8192。
+Qwen-7B模型规模基本情况如下所示。
 
-The details of the model architecture of Qwen-7B are listed as follows. We have increased the sequence length during model training from 8192 in Qwen-7B v1.1 version.
+The details of the model architecture of Qwen-7B are listed as follows. 
 
 | Hyperparameter  |  Value |
 |:----------------|:-------|
@@ -149,9 +149,7 @@ The details of the model architecture of Qwen-7B are listed as follows. We have 
 
 可以看到Qwen-7B在保持中英代码高效解码的前提下，对部分使用人群较多的语种（泰语th、希伯来语he、阿拉伯语ar、韩语ko、越南语vi、日语ja、土耳其语tr、印尼语id、波兰语pl、俄语ru、荷兰语nl、葡萄牙语pt、意大利语it、德语de、西班牙语es、法语fr等）上也实现了较高的压缩率，使得模型在这些语种上也具备较强的可扩展性和较高的训练和推理效率。
 
-在预训练数据方面，Qwen-7B模型一方面利用了部分开源通用语料，
-另一方面也积累了海量全网语料以及高质量文本内容，去重及过滤后的语料超过2.4T tokens。
-囊括全网文本、百科、书籍、代码、数学及各个领域垂类。
+在预训练数据方面，去重及过滤后的语料超过2.4T tokens，囊括全网文本、百科、书籍、代码、数学及各个领域垂类。
 
 <p align="center">
     <img src="assets/tokenizer.png" style="width: 1200px"/>
@@ -165,7 +163,7 @@ We randomly selected 1 million document corpus of each language to test and comp
 
 As can be seen, while ensuring the efficient decoding of Chinese, English, and code, Qwen-7B also achieves a high compression rate for many other languages (such as th, he, ar, ko, vi, ja, tr, id, pl, ru, nl, pt, it, de, es, fr etc.), equipping the model with strong scalability as well as high training and inference efficiency in these languages.
 
-For pre-training data, on the one hand, Qwen-7B uses part of the open-source generic corpus. On the other hand, it uses a massive amount of accumulated web corpus and high-quality text content. The scale of corpus reaches over 2.2T tokens after deduplication and filtration, encompassing web text, encyclopedias, books, code, mathematics, and various domain.
+The scale of pretraining corpus reaches over 2.4T tokens after deduplication and filtration, encompassing web text, encyclopedia, books, code, mathematics, and various domains.
 <br>
 
 ## 评测效果（Evaluation）

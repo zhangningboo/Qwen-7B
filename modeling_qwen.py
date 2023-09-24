@@ -861,6 +861,11 @@ class QWenLMHeadModel(QWenPreTrainedModel):
         assert (
             config.bf16 + config.fp16 + config.fp32 <= 1
         ), "Only one of \"bf16\", \"fp16\", \"fp32\" can be true"
+        logger.warn(
+            "Warning: please make sure that you are using the latest codes and checkpoints, "
+            "especially if you used Qwen-7B before 09.25.2023."
+            "请使用最新模型和代码，尤其如果你在9月25日前已经开始使用Qwen-7B，千万注意不要使用错误代码和模型。"
+        )
 
         autoset_precision = config.bf16 + config.fp16 + config.fp32 == 0
 

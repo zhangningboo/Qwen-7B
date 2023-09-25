@@ -31,6 +31,7 @@ try:
 except ImportError:
     rearrange = None
 from torch import nn
+from kernels.cpp_kernels import cache_autogptq_cuda_256
 
 SUPPORT_CUDA = torch.cuda.is_available()
 SUPPORT_BF16 = SUPPORT_CUDA and torch.cuda.is_bf16_supported()
@@ -75,7 +76,6 @@ apply_rotary_emb_func = None
 rms_norm = None
 flash_attn_unpadded_func = None
 
-
 def _import_flash_attn():
     global apply_rotary_emb_func, rms_norm, flash_attn_unpadded_func
     try:
@@ -112,6 +112,31 @@ def _import_flash_attn():
             "https://github.com/Dao-AILab/flash-attention"
         )
 
+def quantize_cache_v(fdata, bits, qmax, qmin):
+    # b, s, head, h-dim->b, head, s, h-dim
+    qtype = torch.uint8
+    device = fdata.device
+    shape = fdata.shape
+
+    fdata_cal = torch.flatten(fdata, 2)
+    fmax = torch.amax(fdata_cal, dim=-1, keepdim=True)
+    fmin = torch.amin(fdata_cal, dim=-1, keepdim=True)
+    # Compute params
+    if qmax.device != fmax.device:
+        qmax = qmax.to(device)
+        qmin = qmin.to(device)
+    scale = (fmax - fmin) / (qmax - qmin)
+    zero = qmin - fmin / scale
+    scale = scale.unsqueeze(-1).repeat(1,1,shape[2],1).contiguous()
+    zero = zero.unsqueeze(-1).repeat(1,1,shape[2],1).contiguous()
+    # Quantize
+    res_data = fdata / scale + zero
+    qdata = torch.clamp(res_data, qmin, qmax).to(qtype)
+    return qdata.contiguous(), scale, zero
+
+def dequantize_cache_torch(qdata, scale, zero):
+    data = scale * (qdata - zero)
+    return data
 
 class FlashSelfAttention(torch.nn.Module):
     def __init__(
@@ -254,19 +279,51 @@ class QWenAttention(nn.Module):
         self.register_buffer("logn_tensor", logn_tensor, persistent=False)
 
         self.attn_dropout = nn.Dropout(config.attn_dropout_prob)
+        self.use_cache_quantization = config.use_cache_quantization if hasattr(config, 'use_cache_quantization') else False
+        self.use_cache_kernel = config.use_cache_kernel if hasattr(config,'use_cache_kernel') else False
+        cache_dtype = torch.float
+        if self.bf16:
+            cache_dtype=torch.bfloat16
+        elif config.fp16:
+            cache_dtype = torch.float16
+        self.cache_qmax = torch.tensor(torch.iinfo(torch.uint8).max, dtype=cache_dtype)
+        self.cache_qmin = torch.tensor(torch.iinfo(torch.uint8).min, dtype=cache_dtype)
 
     def _attn(self, query, key, value, registered_causal_mask, attention_mask=None, head_mask=None):
-        attn_weights = torch.matmul(query, key.transpose(-1, -2))
+        device = query.device
+        if self.use_cache_quantization:
+            qk, qk_scale, qk_zero = key
+            if self.use_cache_kernel:
+                shape = query.shape[:-1] + (qk.shape[-2],)
+                attn_weights = torch.zeros(shape, dtype=torch.float16, device=device)
+                cache_autogptq_cuda_256.vecquant8matmul_batched_faster_old(
+                    query.contiguous() if query.dtype == torch.float16 else query.to(torch.float16).contiguous(),
+                    qk.transpose(-1, -2).contiguous(),
+                    attn_weights,
+                    qk_scale.contiguous() if qk_scale.dtype == torch.float16 else qk_scale.to(torch.float16).contiguous(),
+                    qk_zero.contiguous()if qk_zero.dtype == torch.float16 else qk_zero.to(torch.float16).contiguous())
+                # attn_weights = attn_weights.to(query.dtype).contiguous()
+            else:
+                key = dequantize_cache_torch(qk, qk_scale, qk_zero)
+                attn_weights = torch.matmul(query, key.transpose(-1, -2))
+        else:
+            attn_weights = torch.matmul(query, key.transpose(-1, -2))
 
         if self.scale_attn_weights:
+            if self.use_cache_quantization:
+                size_temp = value[0].size(-1)
+            else:
+                size_temp = value.size(-1)
             attn_weights = attn_weights / torch.full(
                 [],
-                value.size(-1) ** 0.5,
+                size_temp ** 0.5,
                 dtype=attn_weights.dtype,
                 device=attn_weights.device,
             )
-
-        query_length, key_length = query.size(-2), key.size(-2)
+        if self.use_cache_quantization:
+            query_length, key_length = query.size(-2), key[0].size(-2)
+        else:
+            query_length, key_length = query.size(-2), key.size(-2)
         causal_mask = registered_causal_mask[
             :, :, key_length - query_length : key_length, :key_length
         ]
@@ -283,13 +340,32 @@ class QWenAttention(nn.Module):
 
         attn_weights = nn.functional.softmax(attn_weights.float(), dim=-1)
 
-        attn_weights = attn_weights.type(value.dtype)
+        attn_weights = attn_weights.type(query.dtype)
         attn_weights = self.attn_dropout(attn_weights)
 
         if head_mask is not None:
             attn_weights = attn_weights * head_mask
 
-        attn_output = torch.matmul(attn_weights, value)
+        if self.use_cache_quantization:
+            qv, qv_scale, qv_zero = value
+            if self.use_cache_kernel:
+                shape = attn_weights.shape[:-1] + (query.shape[-1],)
+                attn_output = torch.zeros(shape, dtype=torch.float16, device=device)
+                cache_autogptq_cuda_256.vecquant8matmul_batched_column_compression_faster_old(
+                    attn_weights.contiguous() if attn_weights.dtype == torch.float16 else attn_weights.to(torch.float16).contiguous(),
+                    qv.contiguous(),  # dtype: int32
+                    attn_output,
+                    qv_scale.contiguous() if qv_scale.dtype == torch.float16 else qv_scale.to(torch.float16).contiguous(),
+                    qv_zero.contiguous() if qv_zero.dtype == torch.float16 else qv_zero.to(torch.float16).contiguous())
+                if attn_output.dtype != query.dtype:
+                    attn_output = attn_output.to(query.dtype)
+                    attn_weights = attn_weights.to(query.dtype)
+            else:
+                value = dequantize_cache_torch(qv, qv_scale, qv_zero)
+                attn_output = torch.matmul(attn_weights, value)
+        else:
+            attn_output = torch.matmul(attn_weights, value)
+
         attn_output = attn_output.transpose(1, 2)
 
         return attn_output, attn_weights
@@ -373,7 +449,6 @@ class QWenAttention(nn.Module):
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
     ):
-
         mixed_x_layer = self.c_attn(hidden_states)
 
         query, key, value = mixed_x_layer.split(self.split_size, dim=2)
@@ -405,10 +480,34 @@ class QWenAttention(nn.Module):
                 query = torch.cat(query_list, dim=0)
                 key = torch.cat(key_list, dim=0)
 
+        if self.use_cache_quantization:
+            key = quantize_cache_v(key.permute(0, 2, 1, 3),
+                                       bits=8,
+                                       qmin=self.cache_qmin,
+                                       qmax=self.cache_qmax)
+            value = quantize_cache_v(value.permute(0, 2, 1, 3),
+                                         bits=8,
+                                         qmin=self.cache_qmin,
+                                         qmax=self.cache_qmax)
+
+
         if layer_past is not None:
             past_key, past_value = layer_past[0], layer_past[1]
-            key = torch.cat((past_key, key), dim=1)
-            value = torch.cat((past_value, value), dim=1)
+            if self.use_cache_quantization:
+                # use_cache_quantization:
+                # present=((q_key,key_scale,key_zero_point),
+                #          (q_value,value_scale,value_zero_point))
+                key = (torch.cat((past_key[0], key[0]), dim=2),
+                       torch.cat((past_key[1], key[1]), dim=2),
+                       torch.cat((past_key[2], key[2]), dim=2))
+                value = (torch.cat((past_value[0], value[0]), dim=2),
+                         torch.cat((past_value[1], value[1]), dim=2),
+                         torch.cat((past_value[2], value[2]), dim=2))
+            else:
+                # not use_cache_quantization:
+                # present=(key,value)
+                key = torch.cat((past_key, key), dim=1)
+                value = torch.cat((past_value, value), dim=1)
 
         if use_cache:
             present = (key, value)
@@ -416,8 +515,12 @@ class QWenAttention(nn.Module):
             present = None
 
         if self.use_logn_attn and not self.training:
-            seq_start = key.size(1) - query.size(1)
-            seq_end = key.size(1)
+            if self.use_cache_quantization:
+                seq_start = key[0].size(2) - query.size(1)
+                seq_end = key[0].size(2)
+            else:
+                seq_start = key.size(1) - query.size(1)
+                seq_end = key.size(1)
             logn_tensor = self.logn_tensor[:, seq_start:seq_end, :, :]
             query = query * logn_tensor.expand_as(query)
 
@@ -435,8 +538,9 @@ class QWenAttention(nn.Module):
 
         else:
             query = query.permute(0, 2, 1, 3)
-            key = key.permute(0, 2, 1, 3)
-            value = value.permute(0, 2, 1, 3)
+            if not self.use_cache_quantization:
+                key = key.permute(0, 2, 1, 3)
+                value = value.permute(0, 2, 1, 3)
             if (
                 registered_causal_mask is None
                 and self.use_flash_attn
@@ -597,6 +701,7 @@ class QWenModel(QWenPreTrainedModel):
         self.vocab_size = config.vocab_size
         self.num_hidden_layers = config.num_hidden_layers
         self.embed_dim = config.hidden_size
+        self.use_cache_quantization = self.config.use_cache_quantization if hasattr(self.config, 'use_cache_quantization') else False
 
         self.gradient_checkpointing = False
         self.use_dynamic_ntk = config.use_dynamic_ntk
@@ -721,8 +826,10 @@ class QWenModel(QWenPreTrainedModel):
             past_length = 0
             past_key_values = tuple([None] * len(self.h))
         else:
-            past_length = past_key_values[0][0].size(-2)
-
+            if self.use_cache_quantization:
+                past_length = past_key_values[0][0][0].size(2)
+            else:
+                past_length = past_key_values[0][0].size(-2)
         if position_ids is None:
             position_ids = torch.arange(
                 past_length,
@@ -750,7 +857,10 @@ class QWenModel(QWenPreTrainedModel):
         kv_seq_len = hidden_states.size()[1]
         if past_key_values[0] is not None:
             # past key values[0][0] shape: bs * seq_len * head_num * dim
-            kv_seq_len += past_key_values[0][0].shape[1]
+            if self.use_cache_quantization:
+                kv_seq_len += past_key_values[0][0][0].shape[2]
+            else:
+                kv_seq_len += past_key_values[0][0].shape[1]
 
         if self.training or not self.use_dynamic_ntk:
             ntk_alpha_list = [1.0]
@@ -907,6 +1017,12 @@ class QWenLMHeadModel(QWenPreTrainedModel):
         if config.use_flash_attn:
             _import_flash_attn()
 
+
+        if hasattr(config, 'use_cache_quantization') and config.use_cache_quantization:
+            config.use_flash_attn = False
+            if hasattr(config, 'use_cache_kernel') and config.use_cache_kernel:
+                from kernels.cpp_kernels import cache_autogptq_cuda_256
+
         self.transformer = QWenModel(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
@@ -917,6 +1033,7 @@ class QWenLMHeadModel(QWenPreTrainedModel):
             self.transformer.half()
             self.lm_head.half()
         self.post_init()
+
 
     def get_output_embeddings(self):
         return self.lm_head

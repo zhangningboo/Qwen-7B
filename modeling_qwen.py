@@ -31,7 +31,11 @@ try:
 except ImportError:
     rearrange = None
 from torch import nn
-from kernels.cpp_kernels import cache_autogptq_cuda_256
+
+try:
+    from kernels.cpp_kernels import cache_autogptq_cuda_256
+except ImportError:
+    cache_autogptq_cuda_256 = None
 
 SUPPORT_CUDA = torch.cuda.is_available()
 SUPPORT_BF16 = SUPPORT_CUDA and torch.cuda.is_bf16_supported()
@@ -293,7 +297,7 @@ class QWenAttention(nn.Module):
         device = query.device
         if self.use_cache_quantization:
             qk, qk_scale, qk_zero = key
-            if self.use_cache_kernel:
+            if self.use_cache_kernel and cache_autogptq_cuda_256 is not None:
                 shape = query.shape[:-1] + (qk.shape[-2],)
                 attn_weights = torch.zeros(shape, dtype=torch.float16, device=device)
                 cache_autogptq_cuda_256.vecquant8matmul_batched_faster_old(
@@ -348,7 +352,7 @@ class QWenAttention(nn.Module):
 
         if self.use_cache_quantization:
             qv, qv_scale, qv_zero = value
-            if self.use_cache_kernel:
+            if self.use_cache_kernel and cache_autogptq_cuda_256 is not None:
                 shape = attn_weights.shape[:-1] + (query.shape[-1],)
                 attn_output = torch.zeros(shape, dtype=torch.float16, device=device)
                 cache_autogptq_cuda_256.vecquant8matmul_batched_column_compression_faster_old(
@@ -1021,7 +1025,10 @@ class QWenLMHeadModel(QWenPreTrainedModel):
         if hasattr(config, 'use_cache_quantization') and config.use_cache_quantization:
             config.use_flash_attn = False
             if hasattr(config, 'use_cache_kernel') and config.use_cache_kernel:
-                from kernels.cpp_kernels import cache_autogptq_cuda_256
+                try:
+                    from kernels.cpp_kernels import cache_autogptq_cuda_256
+                except ImportError:
+                    cache_autogptq_cuda_256 = None
 
         self.transformer = QWenModel(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)

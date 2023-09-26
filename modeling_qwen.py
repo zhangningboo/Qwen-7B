@@ -193,9 +193,10 @@ class FlashSelfAttention(torch.nn.Module):
         if attention_mask is not None:
             k, indices_k, cu_seqlens_k, seqlen_k = self.unpad_input(k, attention_mask)
             v = v[indices_k]
-            if seqlen_q == seqlen_k:
+            if self.training or q.size(0) == k.size(0):
                 q = q[indices_k]
                 cu_seqlens_q = cu_seqlens_k
+                seqlen_q = seqlen_k
         else:
             cu_seqlens_k = torch.arange(
                 0,

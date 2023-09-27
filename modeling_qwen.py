@@ -32,11 +32,6 @@ except ImportError:
     rearrange = None
 from torch import nn
 
-try:
-    from kernels.cpp_kernels import cache_autogptq_cuda_256
-except ImportError:
-    cache_autogptq_cuda_256 = None
-
 SUPPORT_CUDA = torch.cuda.is_available()
 SUPPORT_BF16 = SUPPORT_CUDA and torch.cuda.is_bf16_supported()
 SUPPORT_FP16 = SUPPORT_CUDA and torch.cuda.get_device_capability(0)[0] >= 7
@@ -294,14 +289,21 @@ class QWenAttention(nn.Module):
         self.cache_qmax = torch.tensor(torch.iinfo(torch.uint8).max, dtype=cache_dtype)
         self.cache_qmin = torch.tensor(torch.iinfo(torch.uint8).min, dtype=cache_dtype)
 
+        if config.use_cache_quantization and config.use_cache_kernel:
+            from .cpp_kernels import cache_autogptq_cuda_256
+            try:
+                self.cache_kernels = cache_autogptq_cuda_256
+            except ImportError:
+                self.cache_kernels = None
+
     def _attn(self, query, key, value, registered_causal_mask, attention_mask=None, head_mask=None):
         device = query.device
         if self.use_cache_quantization:
             qk, qk_scale, qk_zero = key
-            if self.use_cache_kernel and cache_autogptq_cuda_256 is not None:
+            if self.use_cache_kernel and self.cache_kernels is not None:
                 shape = query.shape[:-1] + (qk.shape[-2],)
                 attn_weights = torch.zeros(shape, dtype=torch.float16, device=device)
-                cache_autogptq_cuda_256.vecquant8matmul_batched_faster_old(
+                self.cache_kernels.vecquant8matmul_batched_faster_old(
                     query.contiguous() if query.dtype == torch.float16 else query.to(torch.float16).contiguous(),
                     qk.transpose(-1, -2).contiguous(),
                     attn_weights,
@@ -353,10 +355,10 @@ class QWenAttention(nn.Module):
 
         if self.use_cache_quantization:
             qv, qv_scale, qv_zero = value
-            if self.use_cache_kernel and cache_autogptq_cuda_256 is not None:
+            if self.use_cache_kernel and self.cache_kernels is not None:
                 shape = attn_weights.shape[:-1] + (query.shape[-1],)
                 attn_output = torch.zeros(shape, dtype=torch.float16, device=device)
-                cache_autogptq_cuda_256.vecquant8matmul_batched_column_compression_faster_old(
+                self.cache_kernels.vecquant8matmul_batched_column_compression_faster_old(
                     attn_weights.contiguous() if attn_weights.dtype == torch.float16 else attn_weights.to(torch.float16).contiguous(),
                     qv.contiguous(),  # dtype: int32
                     attn_output,
@@ -1021,15 +1023,6 @@ class QWenLMHeadModel(QWenPreTrainedModel):
 
         if config.use_flash_attn:
             _import_flash_attn()
-
-
-        if hasattr(config, 'use_cache_quantization') and config.use_cache_quantization:
-            config.use_flash_attn = False
-            if hasattr(config, 'use_cache_kernel') and config.use_cache_kernel:
-                try:
-                    from kernels.cpp_kernels import cache_autogptq_cuda_256
-                except ImportError:
-                    cache_autogptq_cuda_256 = None
 
         self.transformer = QWenModel(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)

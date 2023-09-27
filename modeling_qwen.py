@@ -175,6 +175,7 @@ class FlashSelfAttention(torch.nn.Module):
         assert all((i.is_cuda for i in (q, k, v)))
         batch_size, seqlen_q = q.shape[0], q.shape[1]
         seqlen_k = k.shape[1]
+        seqlen_out = seqlen_q
 
         q, k, v = [rearrange(x, "b s ... -> (b s) ...") for x in [q, k, v]]
         cu_seqlens_q = torch.arange(
@@ -187,11 +188,11 @@ class FlashSelfAttention(torch.nn.Module):
 
         if attention_mask is not None:
             k, indices_k, cu_seqlens_k, seqlen_k = self.unpad_input(k, attention_mask)
-            v = v[indices_k]
-            if self.training or q.size(0) == k.size(0):
+            if q.size(0) == v.size(0):
                 q = q[indices_k]
                 cu_seqlens_q = cu_seqlens_k
                 seqlen_q = seqlen_k
+            v = v[indices_k]
         else:
             cu_seqlens_k = torch.arange(
                 0,
@@ -222,7 +223,7 @@ class FlashSelfAttention(torch.nn.Module):
             causal=is_causal,
         )
         if attention_mask is not None and seqlen_q == seqlen_k:
-            output = self.pad_input(output, indices_k, batch_size, seqlen_q)
+            output = self.pad_input(output, indices_k, batch_size, seqlen_out)
         else:
             new_shape = (batch_size, output.shape[0] // batch_size) + output.shape[1:]
             output = output.view(new_shape)

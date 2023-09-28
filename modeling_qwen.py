@@ -280,6 +280,7 @@ class QWenAttention(nn.Module):
         self.register_buffer("logn_tensor", logn_tensor, persistent=False)
 
         self.attn_dropout = nn.Dropout(config.attn_dropout_prob)
+        self.softmax_in_fp32 = config.softmax_in_fp32 if hasattr(config, 'softmax_in_fp32') else False
         self.use_cache_quantization = config.use_cache_quantization if hasattr(config, 'use_cache_quantization') else False
         self.use_cache_kernel = config.use_cache_kernel if hasattr(config,'use_cache_kernel') else False
         cache_dtype = torch.float
@@ -346,7 +347,10 @@ class QWenAttention(nn.Module):
         if attention_mask is not None:
             attn_weights = attn_weights + attention_mask
 
-        attn_weights = nn.functional.softmax(attn_weights.float(), dim=-1)
+        if self.softmax_in_fp32:
+            attn_weights = nn.functional.softmax(attn_weights.float(), dim=-1)
+        else:
+            attn_weights = nn.functional.softmax(attn_weights, dim=-1)
 
         attn_weights = attn_weights.type(query.dtype)
         attn_weights = self.attn_dropout(attn_weights)

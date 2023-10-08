@@ -16,7 +16,7 @@ inference: false
 <br>
 
 <p align="center">
-        🤗 <a href="https://huggingface.co/Qwen">Hugging Face</a>&nbsp&nbsp | &nbsp&nbsp🤖 <a href="https://modelscope.cn/models/qwen">ModelScope</a>&nbsp&nbsp | &nbsp&nbsp 📑 <a href="https://arxiv.org/abs/2309.16609">Paper</a>&nbsp&nbsp ｜ &nbsp&nbsp🖥️ <a href="https://modelscope.cn/studios/qwen/Qwen-7B-Chat-Demo/summary">Demo</a>
+        🤗 <a href="https://huggingface.co/Qwen">Hugging Face</a>&nbsp&nbsp | &nbsp&nbsp🤖 <a href="https://modelscope.cn/organization/qwen">ModelScope</a>&nbsp&nbsp | &nbsp&nbsp 📑 <a href="https://arxiv.org/abs/2309.16609">Paper</a>&nbsp&nbsp ｜ &nbsp&nbsp🖥️ <a href="https://modelscope.cn/studios/qwen/Qwen-7B-Chat-Demo/summary">Demo</a>
 <br>
 <a href="https://github.com/QwenLM/Qwen/blob/main/assets/wechat.png">WeChat (微信)</a>&nbsp&nbsp ｜ &nbsp&nbsp DingTalk (钉钉) &nbsp&nbsp | &nbsp&nbsp<a href="https://discord.gg/z3GAxXZ9Ce">Discord</a>&nbsp&nbsp
 </p>
@@ -32,7 +32,7 @@ inference: false
 2. **强大的性能**：Qwen-7B在多个中英文下游评测任务上（涵盖常识推理、代码、数学、翻译等），效果显著超越现有的相近规模开源模型，甚至在部分指标上相比更大尺寸模型也有较强竞争力。具体评测结果请详见下文。
 3. **覆盖更全面的词表**：相比目前以中英词表为主的开源模型，Qwen-7B使用了约15万大小的词表。该词表对多语言更加友好，方便用户在不扩展词表的情况下对部分语种进行能力增强和扩展。
 
-如果您想了解更多关于通义千问7B开源模型的细节，我们建议您参阅[Github代码库](https://github.com/QwenLM/Qwen)。
+如果您想了解更多关于通义千问7B开源模型的细节，我们建议您参阅[GitHub代码库](https://github.com/QwenLM/Qwen)。
 
 **Qwen-7B** is the 7B-parameter version of the large language model series, Qwen (abbr. Tongyi Qianwen), proposed by Alibaba Cloud. Qwen-7B is a Transformer-based large language model, which is pretrained on a large volume of data, including web texts, books, codes, etc. Additionally, based on the pretrained Qwen-7B, we release Qwen-7B-Chat, a large-model-based AI assistant, which is trained with alignment techniques. Now we have updated both our pretrained and chat models for better performances. This repository is the one for the Qwen-7B base language model.
 
@@ -42,7 +42,7 @@ The features of Qwen-7B include:
 2. **Competitive performance**: It significantly surpasses existing open-source models of similar scale on multiple Chinese and English downstream evaluation tasks (including commonsense, reasoning, code, mathematics, etc.), and even surpasses some larger-scale models in several benchmarks. See below for specific evaluation results.
 3. **More comprehensive vocabulary coverage**: Compared with other open-source models based on Chinese and English vocabularies, Qwen-7B uses a vocabulary of over 150K tokens. This vocabulary is more friendly to multiple languages, enabling users to directly further enhance the capability for certain languages without expanding the vocabulary.
 
-For more details about Qwen, please refer to the [Github](https://github.com/QwenLM/Qwen) code repository.
+For more details about Qwen, please refer to the [GitHub](https://github.com/QwenLM/Qwen) code repository.
 <br>
 
 ## 要求（Requirements）
@@ -65,15 +65,14 @@ To run Qwen-7B, please make sure you meet the above requirements, and then execu
 pip install transformers==4.32.0 accelerate tiktoken einops scipy transformers_stream_generator==0.0.4 peft deepspeed
 ```
 
-另外，推荐安装`flash-attention`库，以实现更高的效率和更低的显存占用。
+另外，推荐安装`flash-attention`库（**当前已支持flash attention 2**），以实现更高的效率和更低的显存占用。
 
-In addition, it is recommended to install the `flash-attention` library for higher efficiency and lower memory usage.
+In addition, it is recommended to install the `flash-attention` library (**we support flash attention 2 now.**) for higher efficiency and lower memory usage.
 
 ```bash
-git clone -b v1.0.8 https://github.com/Dao-AILab/flash-attention
+git clone https://github.com/Dao-AILab/flash-attention
 cd flash-attention && pip install .
 # 下方安装可选，安装可能比较缓慢。
-# Below are optional. Installing them might be slow.
 # pip install csrc/layer_norm
 # pip install csrc/rotary
 ```
@@ -101,8 +100,8 @@ tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen-7B", trust_remote_code=True
 # use auto mode, automatically select precision based on the device.
 model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen-7B", device_map="auto", trust_remote_code=True).eval()
 
-# Specify hyperparameters for generation
-model.generation_config = GenerationConfig.from_pretrained("Qwen/Qwen-7B", trust_remote_code=True)
+# Specify hyperparameters for generation. But if you use transformers>=4.32.0, there is no need to do this.
+# model.generation_config = GenerationConfig.from_pretrained("Qwen/Qwen-7B", trust_remote_code=True)
 
 inputs = tokenizer('蒙古国的首都是乌兰巴托（Ulaanbaatar）\n冰岛的首都是雷克雅未克（Reykjavik）\n埃塞俄比亚的首都是', return_tensors='pt')
 inputs = inputs.to(model.device)
@@ -111,9 +110,9 @@ print(tokenizer.decode(pred.cpu()[0], skip_special_tokens=True))
 # 蒙古国的首都是乌兰巴托（Ulaanbaatar）\n冰岛的首都是雷克雅未克（Reykjavik）\n埃塞俄比亚的首都是亚的斯亚贝巴（Addis Ababa）...
 ```
 
-关于更多的使用说明，请参考我们的[Github repo](https://github.com/QwenLM/Qwen)获取更多信息。
+关于更多的使用说明，请参考我们的[GitHub repo](https://github.com/QwenLM/Qwen)获取更多信息。
 
-For more information, please refer to our [Github repo](https://github.com/QwenLM/Qwen) for more information.
+For more information, please refer to our [GitHub repo](https://github.com/QwenLM/Qwen) for more information.
 <br>
 
 ## Tokenizer
@@ -171,20 +170,20 @@ The scale of pretraining corpus reaches over 2.4T tokens after deduplication and
 
 We selected MMLU, C-Eval, GSM8K, MATH, HumanEval, MBPP, BBH, CMMLU, which are currently popular benchmarks, to test the model’s Chinese and English knowledge capabilities, translation, mathematical reasoning, coding and other capabilities. From the following comprehensive evaluation results, we can see that the Qwen model outperform the similarly sized open-source models on all tasks.
 
-| Model              |   MMLU   |  C-Eval  |  GSM8K   |    MATH  | HumanEval |    MBPP   |    BBH   |  CMMLU   |
-|:-------------------|:--------:|:--------:|:--------:|:--------:|:---------:|:---------:|:--------:|:--------:|
-|                    |   5-shot |  5-shot  | 8-shot   |   4-shot | 0-shot    |    3-shot | 3-shot   |  5-shot  |
-| LLaMA2-7B              |   46.8   |   32.5   |   16.7   |   3.3    |   12.8    |   20.8    |   38.2   |   31.8   |
-| LLaMA2-13B             |   55.0   |   41.4   |   29.6   |   5.0    |   18.9    |   30.3    |   45.6   |   38.4   |
-| LLaMA2-34B             |   62.6   |    -     |   42.2   |   6.2    |   22.6    |   33.0    |   44.1   |    -     |
-| ChatGLM2-6B            |   47.9   |   51.7   |   32.4   |   6.5    |     -     |     -     |   33.7   |    -     |
-| InternLM-7B            |   51.0   |   53.4   |   31.2   |   6.3    |   10.4    |   14.0    |   37.0   |   51.8   |
-| InternLM-20B           |   62.1   |   58.8   |   52.6   |   7.9    |   25.6    |   35.6    |   52.5   |   59.0   |
-| Baichuan2-7B           |   54.7   |   56.3   |   24.6   |   5.6    |   18.3    |   24.2    |   41.6   |   57.1   |
-| Baichuan2-13B          |   59.5   |   59.0   |   52.8   |   10.1   |   17.1    |   30.2    |   49.0   |   62.0   |
-| Qwen-7B (original) |   56.7   |   59.6   |   51.6   |   -      |   24.4    |   31.2    |   40.6   |   58.8   |
-| **Qwen-7B**        |   58.2   |   63.5   |   51.7   |   11.6   |   29.9    |   31.6    |   45.0   |   62.2   |
-| **Qwen-14B**       | **66.3** | **72.1** | **61.3** | **24.8** | **32.3**  | **40.8**  | **53.4** | **71.0** |
+| Model              |   MMLU   |  C-Eval  |  GSM8K   |   MATH   | HumanEval |   MBPP   |   BBH    |  CMMLU   |
+|:-------------------|:--------:|:--------:|:--------:|:--------:|:---------:|:--------:|:--------:|:--------:|
+|                    |  5-shot  |  5-shot  |  8-shot  |  4-shot  |  0-shot   |  3-shot  |  3-shot  |  5-shot  |
+| LLaMA2-7B          |   46.8   |   32.5   |   16.7   |   3.3    |   12.8    |   20.8   |   38.2   |   31.8   |
+| LLaMA2-13B         |   55.0   |   41.4   |   29.6   |   5.0    |   18.9    |   30.3   |   45.6   |   38.4   |
+| LLaMA2-34B         |   62.6   |    -     |   42.2   |   6.2    |   22.6    |   33.0   |   44.1   |    -     |
+| ChatGLM2-6B        |   47.9   |   51.7   |   32.4   |   6.5    |     -     |    -     |   33.7   |    -     |
+| InternLM-7B        |   51.0   |   53.4   |   31.2   |   6.3    |   10.4    |   14.0   |   37.0   |   51.8   |
+| InternLM-20B       |   62.1   |   58.8   |   52.6   |   7.9    |   25.6    |   35.6   |   52.5   |   59.0   |
+| Baichuan2-7B       |   54.7   |   56.3   |   24.6   |   5.6    |   18.3    |   24.2   |   41.6   |   57.1   |
+| Baichuan2-13B      |   59.5   |   59.0   |   52.8   |   10.1   |   17.1    |   30.2   |   49.0   |   62.0   |
+| Qwen-7B (original) |   56.7   |   59.6   |   51.6   |    -     |   24.4    |   31.2   |   40.6   |   58.8   |
+| **Qwen-7B**        |   58.2   |   63.5   |   51.7   |   11.6   |   29.9    |   31.6   |   45.0   |   62.2   |
+| **Qwen-14B**       | **66.3** | **72.1** | **61.3** | **24.8** | **32.3**  | **40.8** | **53.4** | **71.0** |
 
 ### 长序列评测（Long-Context Evaluation）
 
@@ -241,6 +240,22 @@ We have provided evaluation scripts to reproduce the performance of our model, d
 如遇到问题，敬请查阅[FAQ](https://github.com/QwenLM/Qwen/blob/main/FAQ_zh.md)以及issue区，如仍无法解决再提交issue。
 
 If you meet problems, please refer to [FAQ](https://github.com/QwenLM/Qwen/blob/main/FAQ.md) and the issues first to search a solution before you launch a new issue.
+<br>
+
+## 引用 (Citation)
+
+如果你觉得我们的工作对你有帮助，欢迎引用！
+
+If you find our work helpful, feel free to give us a cite.
+
+```
+@article{qwen,
+  title={Qwen Technical Report},
+  author={Jinze Bai and Shuai Bai and Yunfei Chu and Zeyu Cui and Kai Dang and Xiaodong Deng and Yang Fan and Wenbin Ge and Yu Han and Fei Huang and Binyuan Hui and Luo Ji and Mei Li and Junyang Lin and Runji Lin and Dayiheng Liu and Gao Liu and Chengqiang Lu and Keming Lu and Jianxin Ma and Rui Men and Xingzhang Ren and Xuancheng Ren and Chuanqi Tan and Sinan Tan and Jianhong Tu and Peng Wang and Shijie Wang and Wei Wang and Shengguang Wu and Benfeng Xu and Jin Xu and An Yang and Hao Yang and Jian Yang and Shusheng Yang and Yang Yao and Bowen Yu and Hongyi Yuan and Zheng Yuan and Jianwei Zhang and Xingxuan Zhang and Yichang Zhang and Zhenru Zhang and Chang Zhou and Jingren Zhou and Xiaohuan Zhou and Tianhang Zhu},
+  journal={arXiv preprint arXiv:2309.16609},
+  year={2023}
+}
+```
 <br>
 
 ## 使用协议（License Agreement）

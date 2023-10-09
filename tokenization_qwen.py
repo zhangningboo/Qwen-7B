@@ -42,6 +42,7 @@ SPECIAL_TOKENS = tuple(
         start=SPECIAL_START_ID,
     )
 )
+SPECIAL_TOKENS_SET = set(t for i, t in SPECIAL_TOKENS)
 
 
 def _load_tiktoken_bpe(tiktoken_bpe_file: str) -> Dict[bytes, int]:
@@ -160,7 +161,7 @@ class QWenTokenizer(PreTrainedTokenizer):
             raise ValueError("Adding regular tokens is not supported")
         for token in new_tokens:
             surface_form = token.content if isinstance(token, AddedToken) else token
-            if surface_form not in SPECIAL_TOKENS:
+            if surface_form not in SPECIAL_TOKENS_SET:
                 raise ValueError("Adding unknown special tokens is not supported")
         return 0
 

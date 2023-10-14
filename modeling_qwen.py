@@ -35,6 +35,8 @@ from torch import nn
 SUPPORT_CUDA = torch.cuda.is_available()
 SUPPORT_BF16 = SUPPORT_CUDA and torch.cuda.is_bf16_supported()
 SUPPORT_FP16 = SUPPORT_CUDA and torch.cuda.get_device_capability(0)[0] >= 7
+SUPPORT_TORCH2 = hasattr(torch, '__version__') and int(torch.__version__.split(".")[0]) >= 2
+
 
 from .configuration_qwen import QWenConfig
 from .qwen_generation_utils import (
@@ -186,7 +188,7 @@ class FlashSelfAttention(torch.nn.Module):
             device=q.device,
         )
 
-        if attention_mask is not None:
+        if batch_size > 1 and attention_mask is not None:
             k, indices_k, cu_seqlens_k, seqlen_k = self.unpad_input(k, attention_mask)
             if q.size(0) == v.size(0):
                 q = q[indices_k]
@@ -222,7 +224,7 @@ class FlashSelfAttention(torch.nn.Module):
             softmax_scale=self.softmax_scale,
             causal=is_causal,
         )
-        if attention_mask is not None and seqlen_q == seqlen_k:
+        if batch_size > 1 and attention_mask is not None and seqlen_q == seqlen_k:
             output = self.pad_input(output, indices_k, batch_size, seqlen_out)
         else:
             new_shape = (batch_size, output.shape[0] // batch_size) + output.shape[1:]
@@ -451,7 +453,7 @@ class QWenAttention(nn.Module):
     def forward(
         self,
         hidden_states: Optional[Tuple[torch.FloatTensor]],
-        rotary_pos_emb_list: Optional[List[torch.Tensor]] = None,
+        rotary_pos_emb_list: Optional[List[List[torch.Tensor]]] = None,
         registered_causal_mask: Optional[torch.Tensor] = None,
         layer_past: Optional[Tuple[torch.Tensor]] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
@@ -543,11 +545,7 @@ class QWenAttention(nn.Module):
             and query.is_cuda
         ):
             q, k, v = query, key, value
-            context_layer = self.core_attention_flash(q, k, v, attention_mask=attention_mask)
-
-            # b s h d -> b s (h d)
-            context_layer = context_layer.flatten(2,3).contiguous()
-
+            attn_output = self.core_attention_flash(q, k, v, attention_mask=attention_mask)
         else:
             query = query.permute(0, 2, 1, 3)
             if not self.use_cache_quantization:
@@ -561,12 +559,28 @@ class QWenAttention(nn.Module):
                 and not query.is_cuda
             ):
                 raise Exception(_ERROR_INPUT_CPU_QUERY_WITH_FLASH_ATTN_ACTIVATED)
-            attn_output, attn_weight = self._attn(
-                query, key, value, registered_causal_mask, attention_mask, head_mask
-            )
-            context_layer = self._merge_heads(
-                attn_output, self.num_heads, self.head_dim
-            )
+
+            if not self.use_cache_quantization and SUPPORT_TORCH2:
+                causal_mask = registered_causal_mask[
+                    :, :, key.size(-2) - query.size(-2): key.size(-2), :key.size(-2)
+                ]
+                if attention_mask is not None:
+                    attention_mask = attention_mask.expand(
+                        -1, -1, causal_mask.size(2), -1
+                    ).masked_fill(~causal_mask, torch.finfo(query.dtype).min)
+                else:
+                    attention_mask = causal_mask
+                attn_output = F.scaled_dot_product_attention(
+                    query, key, value, attn_mask=attention_mask
+                ).transpose(1, 2)
+                attn_weight = None
+            else:
+                attn_output, attn_weight = self._attn(
+                    query, key, value, registered_causal_mask, attention_mask, head_mask
+                )
+        context_layer = self._merge_heads(
+            attn_output, self.num_heads, self.head_dim
+        )
 
         attn_output = self.c_proj(context_layer)
 
@@ -624,7 +638,7 @@ class QWenBlock(nn.Module):
     def forward(
         self,
         hidden_states: Optional[Tuple[torch.FloatTensor]],
-        rotary_pos_emb_list: Optional[List[torch.Tensor]] = None,
+        rotary_pos_emb_list: Optional[List[List[torch.Tensor]]] = None,
         registered_causal_mask: Optional[torch.Tensor] = None,
         layer_past: Optional[Tuple[torch.Tensor]] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
@@ -890,11 +904,9 @@ class QWenModel(QWenPreTrainedModel):
                 ntk_alpha = self.get_ntk_alpha(kv_seq_len)
                 ntk_alpha_list.append(ntk_alpha)
         self.rotary_emb._ntk_alpha_cached_list = ntk_alpha_list
-
-        rotary_pos_emb_list = []
-        for ntk_alpha in ntk_alpha_list:
-            rotary_pos_emb = self.rotary_emb(kv_seq_len, ntk_alpha=ntk_alpha)
-            rotary_pos_emb_list.append(rotary_pos_emb)
+        rotary_pos_emb_list = [
+            self.rotary_emb(kv_seq_len, ntk_alpha=ntk_alpha) for ntk_alpha in ntk_alpha_list
+        ]
 
         hidden_states = self.drop(hidden_states)
         output_shape = input_shape + (hidden_states.size(-1),)

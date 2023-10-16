@@ -535,7 +535,7 @@ class QWenAttention(nn.Module):
             else:
                 seq_start = key.size(1) - query.size(1)
                 seq_end = key.size(1)
-            logn_tensor = self.logn_tensor[:, seq_start:seq_end, :, :]
+            logn_tensor = self.logn_tensor[:, seq_start:seq_end, :, :].type_as(query)
             query = query * logn_tensor.expand_as(query)
 
         if (

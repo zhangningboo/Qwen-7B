@@ -3,6 +3,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import copy
 import importlib
 import math
 from typing import TYPE_CHECKING, Optional, Tuple, Union, Callable, List, Any, Generator
@@ -1177,7 +1178,6 @@ class QWenLMHeadModel(QWenPreTrainedModel):
         query: str,
         history: Optional[HistoryType],
         system: str = "You are a helpful assistant.",
-        append_history: bool = True,
         stream: Optional[bool] = _SENTINEL,
         stop_words_ids: Optional[List[List[int]]] = None,
         generation_config: Optional[GenerationConfig] = None,
@@ -1189,6 +1189,10 @@ class QWenLMHeadModel(QWenPreTrainedModel):
         assert generation_config.chat_format == 'chatml', _ERROR_BAD_CHAT_FORMAT
         if history is None:
             history = []
+        else:
+            # make a copy of the user's input such that is is left untouched
+            history = copy.deepcopy(history)
+
         if stop_words_ids is None:
             stop_words_ids = []
 
@@ -1226,8 +1230,11 @@ class QWenLMHeadModel(QWenPreTrainedModel):
             errors='replace'
         )
 
-        if append_history:
-            history.append((query, response))
+        # as history is a copy of the user inputs,
+        # we can always return the new turn to the user.
+        # separating input history and output history also enables the user
+        # to implement more complex history management
+        history.append((query, response))
 
         return response, history
 

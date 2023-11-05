@@ -6,11 +6,13 @@
 import copy
 import importlib
 import math
+import pathlib
 from typing import TYPE_CHECKING, Optional, Tuple, Union, Callable, List, Any, Generator
 
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
+import warnings
 from torch.cuda.amp import autocast
 
 from torch.nn import CrossEntropyLoss
@@ -295,11 +297,19 @@ class QWenAttention(nn.Module):
         self.cache_qmin = torch.tensor(torch.iinfo(torch.uint8).min, dtype=cache_dtype)
 
         if config.use_cache_quantization and config.use_cache_kernel:
-            from .cpp_kernels import cache_autogptq_cuda_256
-            try:
-                self.cache_kernels = cache_autogptq_cuda_256
-            except ImportError:
+            # pre check if the support files existing
+            module_root = pathlib.Path(__file__).parent
+            src_files = ("cache_autogptq_cuda_256.cpp", "cache_autogptq_cuda_kernel_256.cu")
+            if any(not (module_root/src).is_file() for src in src_files):
+                warnings.warn("KV cache kernel source files (.cpp and .cu) not found.")
                 self.cache_kernels = None
+            else:
+                try:
+                    from .cpp_kernels import cache_autogptq_cuda_256
+                    self.cache_kernels = cache_autogptq_cuda_256
+                except ImportError:
+                    warnings.warn("Failed to import KV cache kernels.")
+                    self.cache_kernels = None
 
     def _attn(self, query, key, value, registered_causal_mask, attention_mask=None, head_mask=None):
         device = query.device

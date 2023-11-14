@@ -395,62 +395,6 @@ class QWenAttention(nn.Module):
 
         return attn_output, attn_weights
 
-    def _upcast_and_reordered_attn(
-        self, query, key, value, registered_causal_mask, attention_mask=None, head_mask=None
-    ):
-        bsz, num_heads, q_seq_len, dk = query.size()
-        _, _, k_seq_len, _ = key.size()
-
-        attn_weights = torch.empty(
-            bsz * num_heads,
-            q_seq_len,
-            k_seq_len,
-            dtype=torch.float32,
-            device=query.device,
-        )
-
-        scale_factor = 1.0
-        if self.scale_attn_weights:
-            scale_factor /= float(value.size(-1)) ** 0.5
-
-        with autocast(enabled=False):
-            q, k = query.reshape(-1, q_seq_len, dk), key.transpose(-1, -2).reshape(
-                -1, dk, k_seq_len
-            )
-            attn_weights = torch.baddbmm(
-                attn_weights, q.float(), k.float(), beta=0, alpha=scale_factor
-            )
-            attn_weights = attn_weights.reshape(bsz, num_heads, q_seq_len, k_seq_len)
-
-        query_length, key_length = query.size(-2), key.size(-2)
-        causal_mask = registered_causal_mask[
-            :, :, key_length - query_length : key_length, :key_length
-        ]
-        mask_value = torch.finfo(attn_weights.dtype).min
-        mask_value = torch.tensor(mask_value, dtype=attn_weights.dtype).to(
-            attn_weights.device
-        )
-        attn_weights = torch.where(causal_mask, attn_weights, mask_value)
-
-        if attention_mask is not None:
-            attn_weights = attn_weights + attention_mask
-
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1)
-
-        if attn_weights.dtype != torch.float32:
-            raise RuntimeError(
-                "Error with upcasting, attn_weights does not have dtype torch.float32"
-            )
-        attn_weights = attn_weights.type(value.dtype)
-        attn_weights = self.attn_dropout(attn_weights)
-
-        if head_mask is not None:
-            attn_weights = attn_weights * head_mask
-
-        attn_output = torch.matmul(attn_weights, value)
-
-        return attn_output, attn_weights
-
     def _split_heads(self, tensor, num_heads, attn_head_size):
         new_shape = tensor.size()[:-1] + (num_heads, attn_head_size)
         tensor = tensor.view(new_shape)
@@ -465,7 +409,6 @@ class QWenAttention(nn.Module):
         self,
         hidden_states: Optional[Tuple[torch.FloatTensor]],
         rotary_pos_emb_list: Optional[List[List[torch.Tensor]]] = None,
-        registered_causal_mask: Optional[torch.Tensor] = None,
         layer_past: Optional[Tuple[torch.Tensor]] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
@@ -558,6 +501,9 @@ class QWenAttention(nn.Module):
             q, k, v = query, key, value
             attn_output = self.core_attention_flash(q, k, v, attention_mask=attention_mask)
         else:
+            registered_causal_mask = torch.tril(
+                torch.ones((key.size(1), key.size(1)), dtype=torch.bool, device=key.device)
+            ).view(1, 1, key.size(1), key.size(1))
             query = query.permute(0, 2, 1, 3)
             if not self.use_cache_quantization:
                 key = key.permute(0, 2, 1, 3)
@@ -650,7 +596,6 @@ class QWenBlock(nn.Module):
         self,
         hidden_states: Optional[Tuple[torch.FloatTensor]],
         rotary_pos_emb_list: Optional[List[List[torch.Tensor]]] = None,
-        registered_causal_mask: Optional[torch.Tensor] = None,
         layer_past: Optional[Tuple[torch.Tensor]] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
@@ -664,7 +609,6 @@ class QWenBlock(nn.Module):
         attn_outputs = self.attn(
             layernorm_output,
             rotary_pos_emb_list,
-            registered_causal_mask=registered_causal_mask,
             layer_past=layer_past,
             attention_mask=attention_mask,
             head_mask=head_mask,
@@ -764,21 +708,6 @@ class QWenModel(QWenPreTrainedModel):
 
         self.use_flash_attn = config.use_flash_attn
         self.is_fp32 = not (config.bf16 or config.fp16)
-        if (
-            self.use_flash_attn
-            and flash_attn_unpadded_func is not None
-            and not self.is_fp32
-        ):
-            self.registered_causal_mask = None
-        else:
-            max_positions = config.max_position_embeddings
-            self.register_buffer(
-                "registered_causal_mask",
-                torch.tril(
-                    torch.ones((max_positions, max_positions), dtype=torch.bool)
-                ).view(1, 1, max_positions, max_positions),
-                persistent=False,
-            )
 
         self.h = nn.ModuleList(
             [
@@ -950,7 +879,6 @@ class QWenModel(QWenPreTrainedModel):
                     create_custom_forward(block),
                     hidden_states,
                     rotary_pos_emb_list,
-                    self.registered_causal_mask,
                     None,
                     attention_mask,
                     head_mask[i],
@@ -962,7 +890,6 @@ class QWenModel(QWenPreTrainedModel):
                     hidden_states,
                     layer_past=layer_past,
                     rotary_pos_emb_list=rotary_pos_emb_list,
-                    registered_causal_mask=self.registered_causal_mask,
                     attention_mask=attention_mask,
                     head_mask=head_mask[i],
                     encoder_hidden_states=encoder_hidden_states,

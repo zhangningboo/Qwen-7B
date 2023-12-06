@@ -520,9 +520,7 @@ class QWenAttention(nn.Module):
 
             if not self.use_cache_quantization and SUPPORT_TORCH2:
                 if attention_mask is not None:
-                    attention_mask = attention_mask.expand(
-                        -1, -1, causal_mask.size(2), -1
-                    )
+                    attention_mask = attention_mask.expand(-1, -1, key_size, -1)
                     if causal_mask is not None:
                         attention_mask = attention_mask.masked_fill(~causal_mask, torch.finfo(query.dtype).min)
                 else:
@@ -1330,14 +1328,14 @@ def apply_rotary_pos_emb(t, freqs):
       t (tensor(batch_size, seq_len, n_head, head_dim)):
         the input embedding/hidden states
       freqs (list[tensor(1, seq_len, 1, rotary_dim), tensor(1, seq_len, 1, rotary_dim)]):
-        the cached cos/sin position embeddings 
+        the cached cos/sin position embeddings
     """
     rot_dim = freqs[0].shape[-1]
     cos, sin = freqs
     t_float = t.float()
     if apply_rotary_emb_func is not None and t.is_cuda:
-        # apply_rotary_emb in flash_attn requires cos/sin to be of 
-        # shape (seqlen, rotary_dim / 2) and apply rotary embedding 
+        # apply_rotary_emb in flash_attn requires cos/sin to be of
+        # shape (seqlen, rotary_dim / 2) and apply rotary embedding
         # to the first rotary_dim of the input
         cos = cos.squeeze(0).squeeze(1)[:, : rot_dim // 2]
         sin = sin.squeeze(0).squeeze(1)[:, : rot_dim // 2]

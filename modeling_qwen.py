@@ -520,7 +520,7 @@ class QWenAttention(nn.Module):
 
             if not self.use_cache_quantization and SUPPORT_TORCH2:
                 if attention_mask is not None:
-                    attention_mask = attention_mask.expand(-1, -1, key_size, -1)
+                    attention_mask = attention_mask.expand(-1, -1, query.size(2), -1)
                     if causal_mask is not None:
                         attention_mask = attention_mask.masked_fill(~causal_mask, torch.finfo(query.dtype).min)
                 else:
